@@ -6,7 +6,7 @@ use egui::{self, Align2, Color32, ComboBox, FontId, Id, Layout, Rounding, Stroke
 use crate::audio::{SynthAudio, list_output_device_names};
 use crate::scope::ScopeBuffer;
 use crate::settings::{AppSettings, KeybindScheme, LayoutMode, ThemeKind};
-use crate::synth::{SynthParams, SynthShared, Waveform};
+use crate::synth::{InstrumentKind, SynthParams, SynthShared, Waveform};
 
 const LOWEST_NOTE: u8 = 36; // C2
 const HIGHEST_NOTE: u8 = 84; // C6
@@ -27,6 +27,7 @@ pub struct SynthApp {
     settings: AppSettings,
     output_devices: Vec<String>,
     audio_error: Option<String>,
+    settings_open: bool,
 }
 
 impl SynthApp {
@@ -57,6 +58,7 @@ impl SynthApp {
             settings,
             output_devices: devices,
             audio_error: None,
+            settings_open: false,
         }
     }
 
@@ -77,7 +79,7 @@ impl SynthApp {
 
 impl eframe::App for SynthApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint();
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
         let keyboard_events = collect_keyboard_events(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -87,97 +89,115 @@ impl eframe::App for SynthApp {
             let mut device_changed = false;
             let mut layout_changed = false;
             let mut keybinds_changed = false;
-            ui.horizontal(|ui| {
-                ui.strong("Angel Synth");
-                ui.label("FL-style minimal layout · Left/Right = octave");
-                ui.separator();
-                theme_changed = theme_selector(ui, ctx, &mut self.settings);
-                if ui.button("Reset sound").clicked() {
-                    reset_requested = true;
-                }
-                ui.separator();
-                device_changed = output_selector(
-                    ui,
-                    &self.output_devices,
-                    &mut self.settings.output_device,
-                    &mut self.audio_error,
-                );
-                ui.separator();
-                keybinds_changed = keybind_selector(ui, &mut self.settings);
-                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(key) = self.last_key {
-                        ui.label(format!("Last key: {:?}", key));
-                    } else {
-                        ui.label("Play with keyboard or mouse");
+
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.with_layout(Layout::top_down(egui::Align::LEFT), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.strong("Angel Synth");
+                            ui.label("FL-style minimal layout · Left/Right = octave");
+                            ui.separator();
+                            if ui.button("Settings").clicked() {
+                                self.settings_open = true;
+                            }
+                            ui.separator();
+                            theme_changed = theme_selector(ui, ctx, &mut self.settings);
+                            if ui.button("Reset sound").clicked() {
+                                reset_requested = true;
+                            }
+                            ui.separator();
+                            device_changed = output_selector(
+                                ui,
+                                &self.output_devices,
+                                &mut self.settings.output_device,
+                                &mut self.audio_error,
+                            );
+                            ui.separator();
+                            keybinds_changed = keybind_selector(ui, &mut self.settings);
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                if let Some(key) = self.last_key {
+                                    ui.label(format!("Last key: {:?}", key));
+                                } else {
+                                    ui.label("Play with keyboard or mouse");
+                                }
+                            });
+                        });
+                    });
+
+                    ui.add_space(6.0);
+
+                    let mut shared = self.shared.lock().expect("Synth parameters poisoned");
+                    if reset_requested {
+                        shared.params = SynthParams::default();
+                    }
+
+                    handle_keyboard_events(
+                        &keyboard_events,
+                        &mut shared,
+                        &mut self.last_key,
+                        &mut self.octave_offset,
+                    );
+
+                    fl_card(
+                        ui,
+                        "Wave Scope",
+                        self.settings.card_padding,
+                        self.settings.card_rounding,
+                        |ui| draw_scope(ui, self.settings.scope_height, &self.scope),
+                    );
+                    ui.add_space(8.0);
+                    fl_card(
+                        ui,
+                        "Keyboard",
+                        self.settings.card_padding,
+                        self.settings.card_rounding,
+                        |ui| {
+                            if self.settings_open {
+                                ui.label("Keyboard disabled while settings are open.");
+                            } else {
+                                draw_piano(
+                                    ui,
+                                    ctx,
+                                    &mut shared,
+                                    &mut self.mouse_note,
+                                    self.settings.keyboard_scale,
+                                )
+                            }
+                        },
+                    );
+                    ui.add_space(10.0);
+
+                    layout_changed |= layout_grid(ui, &mut shared, &mut self.settings);
+
+                    let new_params = shared.params.clone();
+                    let params_changed = new_params != self.settings.params;
+                    drop(shared);
+
+                    if device_changed {
+                        if let Err(err) = self.switch_output_device() {
+                            self.audio_error = Some(err);
+                        }
+                    }
+
+                    if params_changed
+                        || theme_changed
+                        || device_changed
+                        || layout_changed
+                        || keybinds_changed
+                    {
+                        self.settings.params = new_params;
+                        self.settings.output_device = Some(self._audio.device_name.clone());
+                        self.settings.save(&self.settings_path);
+                    }
+
+                    if let Some(err) = &self.audio_error {
+                        ui.colored_label(Color32::RED, format!("Audio: {err}"));
                     }
                 });
-            });
-            ui.add_space(6.0);
-
-            let mut shared = self.shared.lock().expect("Synth parameters poisoned");
-            if reset_requested {
-                shared.params = SynthParams::default();
-            }
-
-            handle_keyboard_events(
-                &keyboard_events,
-                &mut shared,
-                &mut self.last_key,
-                &mut self.octave_offset,
-            );
-
-            fl_card(
-                ui,
-                "Wave Scope",
-                self.settings.card_padding,
-                self.settings.card_rounding,
-                |ui| draw_scope(ui, self.settings.scope_height, &self.scope),
-            );
-            ui.add_space(8.0);
-            fl_card(
-                ui,
-                "Keyboard",
-                self.settings.card_padding,
-                self.settings.card_rounding,
-                |ui| {
-                    draw_piano(
-                        ui,
-                        ctx,
-                        &mut shared,
-                        &mut self.mouse_note,
-                        self.settings.keyboard_scale,
-                    )
-                },
-            );
-            ui.add_space(10.0);
-
-            layout_changed |= layout_grid(ui, &mut shared, &mut self.settings);
-
-            let new_params = shared.params.clone();
-            let params_changed = new_params != self.settings.params;
-            drop(shared);
-
-            if device_changed {
-                if let Err(err) = self.switch_output_device() {
-                    self.audio_error = Some(err);
-                }
-            }
-
-            if params_changed
-                || theme_changed
-                || device_changed
-                || layout_changed
-                || keybinds_changed
-            {
-                self.settings.params = new_params;
-                self.settings.output_device = Some(self._audio.device_name.clone());
-                self.settings.save(&self.settings_path);
-            }
-
-            if let Some(err) = &self.audio_error {
-                ui.colored_label(Color32::RED, format!("Audio: {err}"));
-            }
         });
+
+        settings_popup(ctx, self);
     }
 }
 
@@ -199,6 +219,21 @@ fn tone_controls(ui: &mut egui::Ui, shared: &mut SynthShared) {
             .logarithmic(true)
             .text("Release (s)"),
     );
+
+    ui.horizontal(|ui| {
+        ui.label("Instrument");
+        ComboBox::from_id_source("instrument")
+            .selected_text(shared.params.instrument.label())
+            .show_ui(ui, |ui| {
+                for instrument in InstrumentKind::ALL {
+                    ui.selectable_value(
+                        &mut shared.params.instrument,
+                        instrument,
+                        instrument.label(),
+                    );
+                }
+            });
+    });
 
     ui.horizontal(|ui| {
         ui.label("Waveform");
@@ -387,7 +422,8 @@ fn draw_piano(
         .count();
     let aspect = BASE_WHITE_KEY_HEIGHT / BASE_WHITE_KEY_WIDTH;
     let available_width = ui.available_width().max(white_key_count as f32 * 12.0);
-    let white_key_width = (available_width / white_key_count as f32).clamp(18.0, 80.0);
+    let white_key_width =
+        (available_width / white_key_count as f32).clamp(16.0, 80.0) * scale.clamp(0.7, 1.4);
     let white_key_height = white_key_width * aspect * scale.clamp(0.7, 1.4);
     let black_key_width = white_key_width * BLACK_KEY_WIDTH_RATIO;
     let black_key_height = white_key_height * BLACK_KEY_HEIGHT_RATIO;
@@ -526,9 +562,48 @@ fn keybind_selector(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
     settings.keybinds != before
 }
 
+fn settings_popup(ctx: &egui::Context, app: &mut SynthApp) {
+    if app.settings_open {
+        egui::Window::new("Settings")
+            .open(&mut app.settings_open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size(egui::vec2(420.0, 320.0))
+            .show(ctx, |ui| {
+                ui.heading("App Settings");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Theme");
+                    let _ = theme_selector(ui, ctx, &mut app.settings);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Keybinds");
+                    let _ = keybind_selector(ui, &mut app.settings);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Output");
+                    let _ = output_selector(
+                        ui,
+                        &app.output_devices,
+                        &mut app.settings.output_device,
+                        &mut app.audio_error,
+                    );
+                });
+                ui.separator();
+                ui.label("Layout & sizing");
+                let _ = layout_controls(ui, &mut app.settings);
+            });
+    }
+}
+
 fn layout_grid(ui: &mut egui::Ui, shared: &mut SynthShared, settings: &mut AppSettings) -> bool {
     let mut changed = false;
-    match settings.layout_mode {
+    let resolved = match settings.layout_mode {
+        LayoutMode::Auto => auto_layout_for_width(ui.available_width()),
+        other => other,
+    };
+
+    match resolved {
         LayoutMode::Stacked => {
             changed |= layout_controls(ui, settings);
             ui.add_space(6.0);
@@ -587,7 +662,7 @@ fn layout_grid(ui: &mut egui::Ui, shared: &mut SynthShared, settings: &mut AppSe
                 });
             });
         }
-        LayoutMode::ThreeColumn => {
+        LayoutMode::ThreeColumn | LayoutMode::Auto => {
             ui.columns(3, |columns| {
                 columns[0].vertical(|ui| {
                     fl_card(
@@ -683,6 +758,16 @@ fn layout_controls(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
         },
     );
     changed
+}
+
+fn auto_layout_for_width(width: f32) -> LayoutMode {
+    if width < 720.0 {
+        LayoutMode::Stacked
+    } else if width < 1080.0 {
+        LayoutMode::TwoColumn
+    } else {
+        LayoutMode::ThreeColumn
+    }
 }
 fn fl_card(
     ui: &mut egui::Ui,

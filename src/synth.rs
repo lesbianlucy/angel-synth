@@ -8,6 +8,7 @@ pub struct SynthParams {
     pub decay_seconds: f32,
     pub sustain_level: f32,
     pub release_seconds: f32,
+    pub instrument: InstrumentKind,
     pub waveform: Waveform,
     pub filter_cutoff_hz: f32,
     pub filter_resonance: f32,
@@ -33,6 +34,7 @@ impl Default for SynthParams {
             decay_seconds: 0.2,
             sustain_level: 0.7,
             release_seconds: 0.35,
+            instrument: InstrumentKind::Keys,
             waveform: Waveform::Saw,
             filter_cutoff_hz: 4_000.0,
             filter_resonance: 0.2,
@@ -142,6 +144,32 @@ impl Waveform {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum InstrumentKind {
+    Keys,
+    Bass,
+    Lead,
+    Pad,
+}
+
+impl InstrumentKind {
+    pub const ALL: [InstrumentKind; 4] = [
+        InstrumentKind::Keys,
+        InstrumentKind::Bass,
+        InstrumentKind::Lead,
+        InstrumentKind::Pad,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            InstrumentKind::Keys => "Keys",
+            InstrumentKind::Bass => "Bass",
+            InstrumentKind::Lead => "Lead",
+            InstrumentKind::Pad => "Pad",
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum EnvStage {
     Idle,
@@ -212,6 +240,7 @@ impl VoiceState {
         let base_phase = self.phase;
 
         let mut sample = self.unison_sample(params, base_phase);
+        sample = VoiceState::apply_instrument_color(sample, base_phase, params.instrument);
         if params.noise_mix > 0.0 {
             let noise = self.next_noise();
             sample = sample * (1.0 - params.noise_mix) + noise * params.noise_mix;
@@ -219,6 +248,21 @@ impl VoiceState {
 
         let filtered = self.apply_filter(sample, params, sample_rate);
         filtered * self.env_level * params.gain
+    }
+
+    fn apply_instrument_color(sample: f32, base_phase: f32, instrument: InstrumentKind) -> f32 {
+        match instrument {
+            InstrumentKind::Keys => sample,
+            InstrumentKind::Bass => {
+                let sub = (TAU * (base_phase * 0.5)).sin();
+                ((sample * 0.75) + (sub * 0.35)).clamp(-1.0, 1.0)
+            }
+            InstrumentKind::Lead => {
+                let overtone = (TAU * (base_phase * 2.0)).sin() * 0.2 + sample;
+                (overtone * 1.2).tanh()
+            }
+            InstrumentKind::Pad => sample * 0.9,
+        }
     }
 
     fn unison_sample(&self, params: &SynthParams, base_phase: f32) -> f32 {

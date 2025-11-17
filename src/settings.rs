@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::synth::{SynthParams, Waveform};
+use crate::synth::{InstrumentKind, SynthParams, Waveform};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeKind {
@@ -24,6 +24,7 @@ pub enum ThemeKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayoutMode {
+    Auto,
     Stacked,
     TwoColumn,
     ThreeColumn,
@@ -127,6 +128,7 @@ impl LayoutMode {
 
     pub fn label(self) -> &'static str {
         match self {
+            LayoutMode::Auto => "Auto",
             LayoutMode::Stacked => "Stacked",
             LayoutMode::TwoColumn => "Two columns",
             LayoutMode::ThreeColumn => "Three columns",
@@ -135,14 +137,17 @@ impl LayoutMode {
 
     pub fn from_str(s: &str) -> Self {
         match s.to_ascii_lowercase().as_str() {
+            "auto" => LayoutMode::Auto,
             "stacked" => LayoutMode::Stacked,
             "two_column" | "two-column" => LayoutMode::TwoColumn,
-            _ => LayoutMode::ThreeColumn,
+            "three_column" | "three-column" => LayoutMode::ThreeColumn,
+            _ => LayoutMode::Auto,
         }
     }
 
     pub fn as_key(self) -> &'static str {
         match self {
+            LayoutMode::Auto => "auto",
             LayoutMode::Stacked => "stacked",
             LayoutMode::TwoColumn => "two_column",
             LayoutMode::ThreeColumn => "three_column",
@@ -209,7 +214,7 @@ impl Default for AppSettings {
             theme: ThemeKind::Fl,
             params: SynthParams::default(),
             output_device: None,
-            layout_mode: LayoutMode::ThreeColumn,
+            layout_mode: LayoutMode::Auto,
             card_padding: 12.0,
             card_rounding: 8.0,
             scope_height: 140.0,
@@ -301,6 +306,11 @@ fn apply_kv(key: &str, value: &str, settings: &mut AppSettings) {
         "eq_mid_q" => parse_f32(value, &mut settings.params.eq_mid_q),
         "eq_high_gain_db" => parse_f32(value, &mut settings.params.eq_high_gain_db),
         "eq_high_freq_hz" => parse_f32(value, &mut settings.params.eq_high_freq_hz),
+        "instrument" => {
+            if let Some(inst) = parse_instrument(value) {
+                settings.params.instrument = inst;
+            }
+        }
         _ => {}
     }
 }
@@ -348,6 +358,10 @@ fn append_param_lines(buf: &mut String, params: &SynthParams) {
     buf.push_str(&format!("eq_mid_q={}\n", params.eq_mid_q));
     buf.push_str(&format!("eq_high_gain_db={}\n", params.eq_high_gain_db));
     buf.push_str(&format!("eq_high_freq_hz={}\n", params.eq_high_freq_hz));
+    buf.push_str(&format!(
+        "instrument={}\n",
+        instrument_key(params.instrument)
+    ));
 }
 
 fn waveform_key(waveform: Waveform) -> &'static str {
@@ -356,6 +370,25 @@ fn waveform_key(waveform: Waveform) -> &'static str {
         Waveform::Square => "square",
         Waveform::Saw => "saw",
         Waveform::Triangle => "triangle",
+    }
+}
+
+fn instrument_key(inst: InstrumentKind) -> &'static str {
+    match inst {
+        InstrumentKind::Keys => "keys",
+        InstrumentKind::Bass => "bass",
+        InstrumentKind::Lead => "lead",
+        InstrumentKind::Pad => "pad",
+    }
+}
+
+fn parse_instrument(value: &str) -> Option<InstrumentKind> {
+    match value.to_ascii_lowercase().as_str() {
+        "keys" | "piano" => Some(InstrumentKind::Keys),
+        "bass" => Some(InstrumentKind::Bass),
+        "lead" => Some(InstrumentKind::Lead),
+        "pad" => Some(InstrumentKind::Pad),
+        _ => None,
     }
 }
 
