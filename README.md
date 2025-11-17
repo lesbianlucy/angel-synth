@@ -1,6 +1,6 @@
 # Angel Synth
 
-A pint-sized FL-style piano written in Rust. The app opens an egui window with a clickable keyboard (two octaves, C3–C5) and a couple of tone controls while a `cpal` audio stream renders the oscillator in real time.
+An FL-style piano playground in Rust. The egui front-end renders a four-octave keyboard (C2–C6), shows a live oscilloscope, and feeds a beefed-up synth engine with ADSR, detuned unison, vibrato, noise, multimode filtering, and a simple 3-band EQ while `cpal` streams audio in real time.
 
 ## Running
 
@@ -8,13 +8,12 @@ A pint-sized FL-style piano written in Rust. The app opens an egui window with a
 cargo run
 ```
 
-Click on the keys or use the computer keyboard:
-- White keys: `Z X C V B N M` for C3–B3 and `Q W E R T Y U I` for C4–C5
-- Black keys: `S D G H J` for the lower octave, plus `2 3 5 6 7` for the upper octave sharps
-
-Adjust gain, attack/release, and waveform from the right-hand controls while notes are playing.
+Click the keys or just mash your entire keyboard—every key produces a note, and left/right arrows transpose the computer keyboard mapping in octaves. Adjust gain, ADSR, waveform, filter cutoff/resonance, vibrato, unison spread, noise mix, and the low/mid/high EQ bands from the control panel as you play, and watch the waveform glide across the scope.
 
 ## Tweaking the sound
 
-- All synth code lives in `src/main.rs`. Modify `PIANO_KEYS`, `KEYBOARD_SHORTCUTS`, or the ADSR/waveform logic to explore different layouts and voices.
-- `SynthEngine` is intentionally tiny—it's a good spot to add more modulation (LFOs, filters, etc.) if you want to grow this into a fuller instrument.
+- Core synth/envelope/filter logic lives in `src/synth.rs`.
+- The realtime audio path (and scope ring buffer) is in `src/audio.rs` + `src/scope.rs`.
+- `src/ui.rs` draws the keyboard, handles all keyboard shortcuts, and renders the scope + control panels (including EQ sliders).
+
+It’s all plain Rust—no DSP crates—so feel free to expand `SynthEngine` with more modules (filters, effects, sequencers, etc.) or tweak the visuals to taste.
