@@ -7,19 +7,92 @@ use crate::synth::{SynthParams, Waveform};
 pub enum ThemeKind {
     Fl,
     Light,
+    Midnight,
+    Sunset,
+    Neon,
+    Forest,
+    Ocean,
+    Vapor,
+    Mono,
+    Pastel,
+    SolarizedDark,
+    SolarizedLight,
+    Industrial,
+    Candy,
+    Terminal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutMode {
+    Stacked,
+    TwoColumn,
+    ThreeColumn,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeybindScheme {
+    Default,
+    Vim,
+    Emacs,
+    Sublime,
+    VSCode,
 }
 
 impl ThemeKind {
+    pub const ALL: [ThemeKind; 15] = [
+        ThemeKind::Fl,
+        ThemeKind::Light,
+        ThemeKind::Midnight,
+        ThemeKind::Sunset,
+        ThemeKind::Neon,
+        ThemeKind::Forest,
+        ThemeKind::Ocean,
+        ThemeKind::Vapor,
+        ThemeKind::Mono,
+        ThemeKind::Pastel,
+        ThemeKind::SolarizedDark,
+        ThemeKind::SolarizedLight,
+        ThemeKind::Industrial,
+        ThemeKind::Candy,
+        ThemeKind::Terminal,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             ThemeKind::Fl => "FL Dark",
             ThemeKind::Light => "Light",
+            ThemeKind::Midnight => "Midnight",
+            ThemeKind::Sunset => "Sunset",
+            ThemeKind::Neon => "Neon",
+            ThemeKind::Forest => "Forest",
+            ThemeKind::Ocean => "Ocean",
+            ThemeKind::Vapor => "Vapor",
+            ThemeKind::Mono => "Mono",
+            ThemeKind::Pastel => "Pastel",
+            ThemeKind::SolarizedDark => "Solarized Dark",
+            ThemeKind::SolarizedLight => "Solarized Light",
+            ThemeKind::Industrial => "Industrial",
+            ThemeKind::Candy => "Candy",
+            ThemeKind::Terminal => "Terminal",
         }
     }
 
     pub fn from_str(s: &str) -> Self {
         match s.to_ascii_lowercase().as_str() {
             "light" => ThemeKind::Light,
+            "midnight" => ThemeKind::Midnight,
+            "sunset" => ThemeKind::Sunset,
+            "neon" => ThemeKind::Neon,
+            "forest" => ThemeKind::Forest,
+            "ocean" => ThemeKind::Ocean,
+            "vapor" => ThemeKind::Vapor,
+            "mono" => ThemeKind::Mono,
+            "pastel" => ThemeKind::Pastel,
+            "solarized_dark" | "solarized-dark" => ThemeKind::SolarizedDark,
+            "solarized_light" | "solarized-light" => ThemeKind::SolarizedLight,
+            "industrial" => ThemeKind::Industrial,
+            "candy" => ThemeKind::Candy,
+            "terminal" => ThemeKind::Terminal,
             _ => ThemeKind::Fl,
         }
     }
@@ -28,6 +101,91 @@ impl ThemeKind {
         match self {
             ThemeKind::Fl => "fl",
             ThemeKind::Light => "light",
+            ThemeKind::Midnight => "midnight",
+            ThemeKind::Sunset => "sunset",
+            ThemeKind::Neon => "neon",
+            ThemeKind::Forest => "forest",
+            ThemeKind::Ocean => "ocean",
+            ThemeKind::Vapor => "vapor",
+            ThemeKind::Mono => "mono",
+            ThemeKind::Pastel => "pastel",
+            ThemeKind::SolarizedDark => "solarized_dark",
+            ThemeKind::SolarizedLight => "solarized_light",
+            ThemeKind::Industrial => "industrial",
+            ThemeKind::Candy => "candy",
+            ThemeKind::Terminal => "terminal",
+        }
+    }
+}
+
+impl LayoutMode {
+    pub const ALL: [LayoutMode; 3] = [
+        LayoutMode::Stacked,
+        LayoutMode::TwoColumn,
+        LayoutMode::ThreeColumn,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LayoutMode::Stacked => "Stacked",
+            LayoutMode::TwoColumn => "Two columns",
+            LayoutMode::ThreeColumn => "Three columns",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "stacked" => LayoutMode::Stacked,
+            "two_column" | "two-column" => LayoutMode::TwoColumn,
+            _ => LayoutMode::ThreeColumn,
+        }
+    }
+
+    pub fn as_key(self) -> &'static str {
+        match self {
+            LayoutMode::Stacked => "stacked",
+            LayoutMode::TwoColumn => "two_column",
+            LayoutMode::ThreeColumn => "three_column",
+        }
+    }
+}
+
+impl KeybindScheme {
+    pub const ALL: [KeybindScheme; 5] = [
+        KeybindScheme::Default,
+        KeybindScheme::Vim,
+        KeybindScheme::Emacs,
+        KeybindScheme::Sublime,
+        KeybindScheme::VSCode,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            KeybindScheme::Default => "Default",
+            KeybindScheme::Vim => "Vim",
+            KeybindScheme::Emacs => "Emacs",
+            KeybindScheme::Sublime => "Sublime",
+            KeybindScheme::VSCode => "VS Code",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "vim" => KeybindScheme::Vim,
+            "emacs" => KeybindScheme::Emacs,
+            "sublime" => KeybindScheme::Sublime,
+            "vscode" | "vs code" | "vs_code" => KeybindScheme::VSCode,
+            _ => KeybindScheme::Default,
+        }
+    }
+
+    pub fn as_key(self) -> &'static str {
+        match self {
+            KeybindScheme::Default => "default",
+            KeybindScheme::Vim => "vim",
+            KeybindScheme::Emacs => "emacs",
+            KeybindScheme::Sublime => "sublime",
+            KeybindScheme::VSCode => "vscode",
         }
     }
 }
@@ -37,6 +195,12 @@ pub struct AppSettings {
     pub theme: ThemeKind,
     pub params: SynthParams,
     pub output_device: Option<String>,
+    pub layout_mode: LayoutMode,
+    pub card_padding: f32,
+    pub card_rounding: f32,
+    pub scope_height: f32,
+    pub keyboard_scale: f32,
+    pub keybinds: KeybindScheme,
 }
 
 impl Default for AppSettings {
@@ -45,6 +209,12 @@ impl Default for AppSettings {
             theme: ThemeKind::Fl,
             params: SynthParams::default(),
             output_device: None,
+            layout_mode: LayoutMode::ThreeColumn,
+            card_padding: 12.0,
+            card_rounding: 8.0,
+            scope_height: 140.0,
+            keyboard_scale: 1.0,
+            keybinds: KeybindScheme::Default,
         }
     }
 }
@@ -72,6 +242,12 @@ impl AppSettings {
         if let Some(name) = &self.output_device {
             buf.push_str(&format!("output_device={name}\n"));
         }
+        buf.push_str(&format!("layout_mode={}\n", self.layout_mode.as_key()));
+        buf.push_str(&format!("card_padding={}\n", self.card_padding));
+        buf.push_str(&format!("card_rounding={}\n", self.card_rounding));
+        buf.push_str(&format!("scope_height={}\n", self.scope_height));
+        buf.push_str(&format!("keyboard_scale={}\n", self.keyboard_scale));
+        buf.push_str(&format!("keybinds={}\n", self.keybinds.as_key()));
         append_param_lines(&mut buf, &self.params);
 
         if let Some(parent) = path.parent() {
@@ -95,6 +271,12 @@ fn apply_kv(key: &str, value: &str, settings: &mut AppSettings) {
                 Some(value.to_string())
             }
         }
+        "layout_mode" => settings.layout_mode = LayoutMode::from_str(value),
+        "card_padding" => parse_f32(value, &mut settings.card_padding),
+        "card_rounding" => parse_f32(value, &mut settings.card_rounding),
+        "scope_height" => parse_f32(value, &mut settings.scope_height),
+        "keyboard_scale" => parse_f32(value, &mut settings.keyboard_scale),
+        "keybinds" => settings.keybinds = KeybindScheme::from_str(value),
         "gain" => parse_f32(value, &mut settings.params.gain),
         "attack_seconds" => parse_f32(value, &mut settings.params.attack_seconds),
         "decay_seconds" => parse_f32(value, &mut settings.params.decay_seconds),

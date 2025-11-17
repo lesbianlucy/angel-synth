@@ -24,6 +24,10 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install audio deps (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:

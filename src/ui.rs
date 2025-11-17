@@ -5,7 +5,7 @@ use egui::{self, Align2, Color32, ComboBox, FontId, Id, Layout, Rounding, Stroke
 
 use crate::audio::{SynthAudio, list_output_device_names};
 use crate::scope::ScopeBuffer;
-use crate::settings::{AppSettings, ThemeKind};
+use crate::settings::{AppSettings, KeybindScheme, LayoutMode, ThemeKind};
 use crate::synth::{SynthParams, SynthShared, Waveform};
 
 const LOWEST_NOTE: u8 = 36; // C2
@@ -85,6 +85,8 @@ impl eframe::App for SynthApp {
             let mut theme_changed = false;
             let mut reset_requested = false;
             let mut device_changed = false;
+            let mut layout_changed = false;
+            let mut keybinds_changed = false;
             ui.horizontal(|ui| {
                 ui.strong("Angel Synth");
                 ui.label("FL-style minimal layout · Left/Right = octave");
@@ -100,6 +102,8 @@ impl eframe::App for SynthApp {
                     &mut self.settings.output_device,
                     &mut self.audio_error,
                 );
+                ui.separator();
+                keybinds_changed = keybind_selector(ui, &mut self.settings);
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(key) = self.last_key {
                         ui.label(format!("Last key: {:?}", key));
@@ -122,24 +126,32 @@ impl eframe::App for SynthApp {
                 &mut self.octave_offset,
             );
 
-            fl_card(ui, "Wave Scope", |ui| draw_scope(ui, &self.scope));
+            fl_card(
+                ui,
+                "Wave Scope",
+                self.settings.card_padding,
+                self.settings.card_rounding,
+                |ui| draw_scope(ui, self.settings.scope_height, &self.scope),
+            );
             ui.add_space(8.0);
-            fl_card(ui, "Keyboard", |ui| {
-                draw_piano(ui, ctx, &mut shared, &mut self.mouse_note)
-            });
+            fl_card(
+                ui,
+                "Keyboard",
+                self.settings.card_padding,
+                self.settings.card_rounding,
+                |ui| {
+                    draw_piano(
+                        ui,
+                        ctx,
+                        &mut shared,
+                        &mut self.mouse_note,
+                        self.settings.keyboard_scale,
+                    )
+                },
+            );
             ui.add_space(10.0);
 
-            ui.columns(3, |columns| {
-                columns[0].vertical(|ui| {
-                    fl_card(ui, "Tone & Filter", |ui| tone_controls(ui, &mut shared))
-                });
-                columns[1].vertical(|ui| {
-                    fl_card(ui, "Motion & Noise", |ui| {
-                        modulation_controls(ui, &mut shared)
-                    })
-                });
-                columns[2].vertical(|ui| fl_card(ui, "EQ", |ui| eq_controls(ui, &mut shared)));
-            });
+            layout_changed |= layout_grid(ui, &mut shared, &mut self.settings);
 
             let new_params = shared.params.clone();
             let params_changed = new_params != self.settings.params;
@@ -151,7 +163,12 @@ impl eframe::App for SynthApp {
                 }
             }
 
-            if params_changed || theme_changed || device_changed {
+            if params_changed
+                || theme_changed
+                || device_changed
+                || layout_changed
+                || keybinds_changed
+            {
                 self.settings.params = new_params;
                 self.settings.output_device = Some(self._audio.device_name.clone());
                 self.settings.save(&self.settings_path);
@@ -257,8 +274,8 @@ fn eq_controls(ui: &mut egui::Ui, shared: &mut SynthShared) {
     ui.add(egui::Slider::new(&mut shared.params.eq_mid_q, 0.3..=2.5).text("Mid Q"));
 }
 
-fn draw_scope(ui: &mut egui::Ui, scope: &Arc<Mutex<ScopeBuffer>>) {
-    let desired = egui::vec2(ui.available_width().max(200.0), 140.0);
+fn draw_scope(ui: &mut egui::Ui, height: f32, scope: &Arc<Mutex<ScopeBuffer>>) {
+    let desired = egui::vec2(ui.available_width().max(200.0), height);
     let (rect, _) = ui.allocate_exact_size(desired, egui::Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect(
@@ -363,6 +380,7 @@ fn draw_piano(
     ctx: &egui::Context,
     shared: &mut SynthShared,
     mouse_note: &mut Option<u8>,
+    scale: f32,
 ) {
     let white_key_count = (LOWEST_NOTE..=HIGHEST_NOTE)
         .filter(|n| !is_black(*n))
@@ -370,7 +388,7 @@ fn draw_piano(
     let aspect = BASE_WHITE_KEY_HEIGHT / BASE_WHITE_KEY_WIDTH;
     let available_width = ui.available_width().max(white_key_count as f32 * 12.0);
     let white_key_width = (available_width / white_key_count as f32).clamp(18.0, 80.0);
-    let white_key_height = white_key_width * aspect;
+    let white_key_height = white_key_width * aspect * scale.clamp(0.7, 1.4);
     let black_key_width = white_key_width * BLACK_KEY_WIDTH_RATIO;
     let black_key_height = white_key_height * BLACK_KEY_HEIGHT_RATIO;
     let desired_size = egui::vec2(white_key_count as f32 * white_key_width, white_key_height);
@@ -496,12 +514,189 @@ fn output_selector(
     changed
 }
 
-fn fl_card(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+fn keybind_selector(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
+    let before = settings.keybinds;
+    ComboBox::from_id_source("keybinds_selector")
+        .selected_text(settings.keybinds.label())
+        .show_ui(ui, |ui| {
+            for scheme in KeybindScheme::ALL {
+                ui.selectable_value(&mut settings.keybinds, scheme, scheme.label());
+            }
+        });
+    settings.keybinds != before
+}
+
+fn layout_grid(ui: &mut egui::Ui, shared: &mut SynthShared, settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+    match settings.layout_mode {
+        LayoutMode::Stacked => {
+            changed |= layout_controls(ui, settings);
+            ui.add_space(6.0);
+            fl_card(
+                ui,
+                "Tone & Filter",
+                settings.card_padding,
+                settings.card_rounding,
+                |ui| tone_controls(ui, shared),
+            );
+            ui.add_space(6.0);
+            fl_card(
+                ui,
+                "Motion & Noise",
+                settings.card_padding,
+                settings.card_rounding,
+                |ui| modulation_controls(ui, shared),
+            );
+            ui.add_space(6.0);
+            fl_card(
+                ui,
+                "EQ",
+                settings.card_padding,
+                settings.card_rounding,
+                |ui| eq_controls(ui, shared),
+            );
+        }
+        LayoutMode::TwoColumn => {
+            ui.columns(2, |columns| {
+                columns[0].vertical(|ui| {
+                    changed |= layout_controls(ui, settings);
+                    fl_card(
+                        ui,
+                        "Tone & Filter",
+                        settings.card_padding,
+                        settings.card_rounding,
+                        |ui| tone_controls(ui, shared),
+                    );
+                    ui.add_space(6.0);
+                    fl_card(
+                        ui,
+                        "Motion & Noise",
+                        settings.card_padding,
+                        settings.card_rounding,
+                        |ui| modulation_controls(ui, shared),
+                    );
+                });
+                columns[1].vertical(|ui| {
+                    fl_card(
+                        ui,
+                        "EQ",
+                        settings.card_padding,
+                        settings.card_rounding,
+                        |ui| eq_controls(ui, shared),
+                    );
+                });
+            });
+        }
+        LayoutMode::ThreeColumn => {
+            ui.columns(3, |columns| {
+                columns[0].vertical(|ui| {
+                    fl_card(
+                        ui,
+                        "Tone & Filter",
+                        settings.card_padding,
+                        settings.card_rounding,
+                        |ui| tone_controls(ui, shared),
+                    );
+                });
+                columns[1].vertical(|ui| {
+                    fl_card(
+                        ui,
+                        "Motion & Noise",
+                        settings.card_padding,
+                        settings.card_rounding,
+                        |ui| modulation_controls(ui, shared),
+                    );
+                });
+                columns[2].vertical(|ui| {
+                    fl_card(
+                        ui,
+                        "EQ",
+                        settings.card_padding,
+                        settings.card_rounding,
+                        |ui| eq_controls(ui, shared),
+                    );
+                    ui.add_space(6.0);
+                    changed |= layout_controls(ui, settings);
+                });
+            });
+        }
+    }
+    changed
+}
+
+fn layout_controls(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+    fl_card(
+        ui,
+        "Layout",
+        settings.card_padding,
+        settings.card_rounding,
+        |ui| {
+            let before = settings.layout_mode;
+            ComboBox::from_id_source("layout_mode")
+                .selected_text(settings.layout_mode.label())
+                .show_ui(ui, |ui| {
+                    for mode in LayoutMode::ALL {
+                        ui.selectable_value(&mut settings.layout_mode, mode, mode.label());
+                    }
+                });
+            if settings.layout_mode != before {
+                changed = true;
+            }
+
+            if ui
+                .add(
+                    egui::Slider::new(&mut settings.card_padding, 4.0..=24.0)
+                        .text("Card padding (px)"),
+                )
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .add(
+                    egui::Slider::new(&mut settings.card_rounding, 0.0..=18.0)
+                        .text("Card rounding (px)"),
+                )
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .add(
+                    egui::Slider::new(&mut settings.scope_height, 80.0..=220.0)
+                        .text("Scope height (px)"),
+                )
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .add(
+                    egui::Slider::new(&mut settings.keyboard_scale, 0.7..=1.4)
+                        .text("Keyboard height scale"),
+                )
+                .changed()
+            {
+                changed = true;
+            }
+        },
+    );
+    changed
+}
+fn fl_card(
+    ui: &mut egui::Ui,
+    title: &str,
+    padding: f32,
+    rounding: f32,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    let visuals = ui.visuals().clone();
     egui::Frame::none()
-        .fill(Color32::from_rgb(24, 24, 24))
-        .stroke(Stroke::new(1.0, Color32::from_rgb(45, 45, 45)))
-        .rounding(Rounding::same(8.0))
-        .inner_margin(egui::Margin::same(12.0))
+        .fill(visuals.widgets.noninteractive.bg_fill)
+        .stroke(visuals.widgets.noninteractive.bg_stroke)
+        .rounding(Rounding::same(rounding.clamp(0.0, 18.0)))
+        .inner_margin(egui::Margin::same(padding.clamp(4.0, 24.0)))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.colored_label(ACCENT, title);
@@ -518,8 +713,9 @@ fn theme_selector(ui: &mut egui::Ui, ctx: &egui::Context, settings: &mut AppSett
     ComboBox::from_id_source("theme_selector")
         .selected_text(selected.label())
         .show_ui(ui, |ui| {
-            ui.selectable_value(&mut selected, ThemeKind::Fl, ThemeKind::Fl.label());
-            ui.selectable_value(&mut selected, ThemeKind::Light, ThemeKind::Light.label());
+            for theme in ThemeKind::ALL {
+                ui.selectable_value(&mut selected, theme, theme.label());
+            }
         });
 
     if selected != settings.theme {
@@ -535,32 +731,286 @@ fn apply_theme(ctx: &egui::Context, theme: ThemeKind) {
     match theme {
         ThemeKind::Fl => apply_fl_theme(ctx),
         ThemeKind::Light => apply_light_theme(ctx),
+        ThemeKind::Midnight => apply_midnight_theme(ctx),
+        ThemeKind::Sunset => apply_sunset_theme(ctx),
+        ThemeKind::Neon => apply_neon_theme(ctx),
+        ThemeKind::Forest => apply_forest_theme(ctx),
+        ThemeKind::Ocean => apply_ocean_theme(ctx),
+        ThemeKind::Vapor => apply_vapor_theme(ctx),
+        ThemeKind::Mono => apply_mono_theme(ctx),
+        ThemeKind::Pastel => apply_pastel_theme(ctx),
+        ThemeKind::SolarizedDark => apply_solarized_dark(ctx),
+        ThemeKind::SolarizedLight => apply_solarized_light(ctx),
+        ThemeKind::Industrial => apply_industrial_theme(ctx),
+        ThemeKind::Candy => apply_candy_theme(ctx),
+        ThemeKind::Terminal => apply_terminal_theme(ctx),
     }
 }
 
 fn apply_fl_theme(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
-    style.visuals = egui::Visuals::dark();
-    style.visuals.override_text_color = Some(Color32::from_rgb(235, 235, 235));
-    style.visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(18, 18, 18);
-    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(30, 30, 30);
-    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(60, 60, 60));
-    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(40, 40, 40);
-    style.visuals.widgets.active.bg_fill = Color32::from_rgb(45, 45, 45);
-    style.visuals.selection.bg_fill = ACCENT;
-    style.visuals.selection.stroke = Stroke::new(1.0, Color32::from_rgb(12, 12, 12));
-    style.visuals.window_fill = Color32::from_rgb(14, 14, 14);
-    ctx.set_style(style);
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(235, 235, 235)),
+        ACCENT,
+        Stroke::new(1.0, Color32::from_rgb(12, 12, 12)),
+        Color32::from_rgb(18, 18, 18),
+        Color32::from_rgb(30, 30, 30),
+        Color32::from_rgb(40, 40, 40),
+        Color32::from_rgb(45, 45, 45),
+        Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
+        Color32::from_rgb(14, 14, 14),
+    );
 }
 
 fn apply_light_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::light(),
+        None,
+        Color32::from_rgb(255, 187, 92),
+        Stroke::new(1.0, Color32::from_rgb(70, 50, 20)),
+        Color32::from_rgb(245, 245, 245),
+        Color32::from_rgb(250, 250, 250),
+        Color32::from_rgb(240, 240, 240),
+        Color32::from_rgb(235, 235, 235),
+        Stroke::new(1.0, Color32::from_rgb(200, 200, 200)),
+        Color32::from_rgb(250, 250, 250),
+    );
+}
+
+fn apply_midnight_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(220, 230, 245)),
+        Color32::from_rgb(80, 135, 255),
+        Stroke::new(1.0, Color32::from_rgb(10, 25, 60)),
+        Color32::from_rgb(12, 16, 28),
+        Color32::from_rgb(22, 30, 48),
+        Color32::from_rgb(32, 42, 64),
+        Color32::from_rgb(40, 52, 78),
+        Stroke::new(1.0, Color32::from_rgb(50, 70, 110)),
+        Color32::from_rgb(10, 14, 24),
+    );
+}
+
+fn apply_sunset_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(245, 230, 220)),
+        Color32::from_rgb(255, 109, 96),
+        Stroke::new(1.0, Color32::from_rgb(25, 10, 10)),
+        Color32::from_rgb(20, 16, 24),
+        Color32::from_rgb(32, 26, 36),
+        Color32::from_rgb(42, 34, 48),
+        Color32::from_rgb(50, 40, 56),
+        Stroke::new(1.0, Color32::from_rgb(80, 60, 70)),
+        Color32::from_rgb(18, 14, 22),
+    );
+}
+
+fn apply_neon_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(220, 255, 240)),
+        Color32::from_rgb(0, 255, 170),
+        Stroke::new(1.0, Color32::from_rgb(10, 40, 30)),
+        Color32::from_rgb(10, 12, 20),
+        Color32::from_rgb(18, 20, 30),
+        Color32::from_rgb(30, 32, 50),
+        Color32::from_rgb(40, 42, 60),
+        Stroke::new(1.0, Color32::from_rgb(40, 90, 70)),
+        Color32::from_rgb(8, 10, 18),
+    );
+}
+
+fn apply_forest_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(220, 235, 210)),
+        Color32::from_rgb(120, 200, 120),
+        Stroke::new(1.0, Color32::from_rgb(30, 70, 30)),
+        Color32::from_rgb(14, 20, 16),
+        Color32::from_rgb(24, 34, 26),
+        Color32::from_rgb(32, 46, 36),
+        Color32::from_rgb(38, 54, 42),
+        Stroke::new(1.0, Color32::from_rgb(50, 85, 55)),
+        Color32::from_rgb(10, 16, 12),
+    );
+}
+
+fn apply_ocean_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(215, 240, 255)),
+        Color32::from_rgb(80, 200, 255),
+        Stroke::new(1.0, Color32::from_rgb(15, 45, 70)),
+        Color32::from_rgb(10, 18, 26),
+        Color32::from_rgb(18, 28, 40),
+        Color32::from_rgb(26, 38, 52),
+        Color32::from_rgb(32, 46, 60),
+        Stroke::new(1.0, Color32::from_rgb(50, 90, 120)),
+        Color32::from_rgb(8, 14, 22),
+    );
+}
+
+fn apply_vapor_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(238, 220, 255)),
+        Color32::from_rgb(255, 105, 180),
+        Stroke::new(1.0, Color32::from_rgb(60, 10, 40)),
+        Color32::from_rgb(18, 12, 26),
+        Color32::from_rgb(26, 18, 36),
+        Color32::from_rgb(34, 24, 46),
+        Color32::from_rgb(42, 30, 56),
+        Stroke::new(1.0, Color32::from_rgb(90, 50, 110)),
+        Color32::from_rgb(14, 10, 22),
+    );
+}
+
+fn apply_mono_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(230, 230, 230)),
+        Color32::from_rgb(180, 180, 180),
+        Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
+        Color32::from_rgb(18, 18, 18),
+        Color32::from_rgb(26, 26, 26),
+        Color32::from_rgb(34, 34, 34),
+        Color32::from_rgb(42, 42, 42),
+        Stroke::new(1.0, Color32::from_rgb(70, 70, 70)),
+        Color32::from_rgb(12, 12, 12),
+    );
+}
+
+fn apply_pastel_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::light(),
+        None,
+        Color32::from_rgb(255, 170, 200),
+        Stroke::new(1.0, Color32::from_rgb(200, 130, 150)),
+        Color32::from_rgb(248, 246, 242),
+        Color32::from_rgb(242, 238, 232),
+        Color32::from_rgb(238, 232, 226),
+        Color32::from_rgb(234, 226, 220),
+        Stroke::new(1.0, Color32::from_rgb(210, 200, 195)),
+        Color32::from_rgb(248, 246, 242),
+    );
+}
+
+fn apply_solarized_dark(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(238, 232, 213)),
+        Color32::from_rgb(181, 137, 0),
+        Stroke::new(1.0, Color32::from_rgb(88, 110, 117)),
+        Color32::from_rgb(0, 43, 54),
+        Color32::from_rgb(7, 54, 66),
+        Color32::from_rgb(23, 69, 79),
+        Color32::from_rgb(36, 87, 100),
+        Stroke::new(1.0, Color32::from_rgb(88, 110, 117)),
+        Color32::from_rgb(0, 43, 54),
+    );
+}
+
+fn apply_solarized_light(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::light(),
+        Some(Color32::from_rgb(101, 123, 131)),
+        Color32::from_rgb(181, 137, 0),
+        Stroke::new(1.0, Color32::from_rgb(88, 110, 117)),
+        Color32::from_rgb(253, 246, 227),
+        Color32::from_rgb(238, 232, 213),
+        Color32::from_rgb(231, 225, 206),
+        Color32::from_rgb(223, 216, 198),
+        Stroke::new(1.0, Color32::from_rgb(133, 153, 0)),
+        Color32::from_rgb(253, 246, 227),
+    );
+}
+
+fn apply_industrial_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(220, 220, 220)),
+        Color32::from_rgb(255, 140, 0),
+        Stroke::new(1.0, Color32::from_rgb(80, 60, 20)),
+        Color32::from_rgb(18, 18, 18),
+        Color32::from_rgb(28, 28, 30),
+        Color32::from_rgb(38, 38, 40),
+        Color32::from_rgb(46, 46, 48),
+        Stroke::new(1.0, Color32::from_rgb(70, 70, 72)),
+        Color32::from_rgb(14, 14, 14),
+    );
+}
+
+fn apply_candy_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::light(),
+        None,
+        Color32::from_rgb(255, 105, 180),
+        Stroke::new(1.0, Color32::from_rgb(180, 70, 120)),
+        Color32::from_rgb(252, 244, 248),
+        Color32::from_rgb(248, 236, 244),
+        Color32::from_rgb(244, 230, 240),
+        Color32::from_rgb(240, 224, 236),
+        Stroke::new(1.0, Color32::from_rgb(210, 170, 190)),
+        Color32::from_rgb(252, 244, 248),
+    );
+}
+
+fn apply_terminal_theme(ctx: &egui::Context) {
+    apply_palette(
+        ctx,
+        egui::Visuals::dark(),
+        Some(Color32::from_rgb(120, 255, 120)),
+        Color32::from_rgb(120, 255, 120),
+        Stroke::new(1.0, Color32::from_rgb(30, 80, 30)),
+        Color32::from_rgb(8, 12, 8),
+        Color32::from_rgb(12, 18, 12),
+        Color32::from_rgb(16, 24, 16),
+        Color32::from_rgb(20, 28, 20),
+        Stroke::new(1.0, Color32::from_rgb(40, 80, 40)),
+        Color32::from_rgb(6, 10, 6),
+    );
+}
+
+fn apply_palette(
+    ctx: &egui::Context,
+    mut visuals: egui::Visuals,
+    override_text: Option<Color32>,
+    selection_fill: Color32,
+    selection_stroke: Stroke,
+    noninteractive: Color32,
+    inactive: Color32,
+    hovered: Color32,
+    active: Color32,
+    widget_stroke: Stroke,
+    window_fill: Color32,
+) {
     let mut style = (*ctx.style()).clone();
-    style.visuals = egui::Visuals::light();
-    style.visuals.selection.bg_fill = Color32::from_rgb(255, 187, 92);
-    style.visuals.selection.stroke = Stroke::new(1.0, Color32::from_rgb(70, 50, 20));
-    style.visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(245, 245, 245);
-    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(250, 250, 250);
-    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(200, 200, 200));
+    visuals.override_text_color = override_text;
+    visuals.selection.bg_fill = selection_fill;
+    visuals.selection.stroke = selection_stroke;
+    visuals.widgets.noninteractive.bg_fill = noninteractive;
+    visuals.widgets.inactive.bg_fill = inactive;
+    visuals.widgets.hovered.bg_fill = hovered;
+    visuals.widgets.active.bg_fill = active;
+    visuals.widgets.inactive.bg_stroke = widget_stroke;
+    visuals.window_fill = window_fill;
+    style.visuals = visuals;
     ctx.set_style(style);
 }
 
