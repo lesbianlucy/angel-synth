@@ -82,9 +82,7 @@ impl AppSettings {
 }
 
 pub fn default_settings_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("angel_settings.cfg")
+    config_dir().join("angel_settings.cfg")
 }
 
 fn apply_kv(key: &str, value: &str, settings: &mut AppSettings) {
@@ -177,4 +175,49 @@ fn waveform_key(waveform: Waveform) -> &'static str {
         Waveform::Saw => "saw",
         Waveform::Triangle => "triangle",
     }
+}
+
+fn config_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(roaming) = std::env::var("APPDATA") {
+            return PathBuf::from(roaming).join("Angel");
+        }
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            return PathBuf::from(local).join("Angel");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = home_dir() {
+            return home
+                .join("Library")
+                .join("Application Support")
+                .join("Angel");
+        }
+    }
+
+    // Default: XDG-ish on Linux/other Unix
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        return PathBuf::from(xdg).join("angel");
+    }
+
+    home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
+        .join("angel")
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(PathBuf::from).or_else(|| {
+        #[cfg(target_os = "windows")]
+        {
+            std::env::var("USERPROFILE").ok().map(PathBuf::from)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            None
+        }
+    })
 }
